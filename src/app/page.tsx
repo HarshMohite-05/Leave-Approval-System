@@ -1,100 +1,213 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import Navbar from '@/components/Navbar';
+import LoginForm from '@/components/LoginForm';
+import DirectorDashboard from '@/components/DirectorDashboard';
+import AdminDashboard from '@/components/AdminDashboard';
+import EmployeeDashboard from '@/components/EmployeeDashboard';
+import DirectorNotificationDrawer from '@/components/DirectorNotificationDrawer';
+import DailyDigestModal from '@/components/DailyDigestModal';
+import { User, LeaveBalance, LeaveRequest, Holiday } from '@/lib/types';
+import { RefreshCw } from 'lucide-react';
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentBalance, setCurrentBalance] = useState<LeaveBalance | null>(null);
+  const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
+  const [employees, setEmployees] = useState<Array<User & { balance?: LeaveBalance | null }>>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
+  // Modals
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [digestModalOpen, setDigestModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Load all system data
+  const refreshAllData = useCallback(async () => {
+    try {
+      // 1. Fetch leaves
+      const leavesRes = await fetch('/api/leaves');
+      const leavesData = await leavesRes.json();
+      if (leavesData.leaves) {
+        setLeaves(leavesData.leaves);
+      }
+
+      // 2. Fetch employees & balances
+      const empRes = await fetch('/api/employees');
+      const empData = await empRes.json();
+      if (empData.employees) {
+        setEmployees(empData.employees);
+      }
+
+      // 3. Fetch holidays
+      const holRes = await fetch('/api/holidays');
+      const holData = await holRes.json();
+      if (holData.holidays) {
+        setHolidays(holData.holidays);
+      }
+
+      // 4. Fetch notification count
+      const notifRes = await fetch('/api/notifications');
+      const notifData = await notifRes.json();
+      setUnreadNotificationsCount(notifData.unreadCount || 0);
+
+      // 5. Refresh current user's balance
+      if (currentUser) {
+        const userRes = await fetch(`/api/auth/me?user_id=${currentUser.id}`);
+        const userData = await userRes.json();
+        if (userData.balance) {
+          setCurrentBalance(userData.balance);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load application data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUser]);
+
+  // Initial load: Check for existing session in localStorage
+  useEffect(() => {
+    const savedUser = localStorage.getItem('nirmaan_current_user');
+    if (savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        setCurrentUser(parsed);
+      } catch {
+        localStorage.removeItem('nirmaan_current_user');
+        setCurrentUser(null);
+      }
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      refreshAllData();
+    }
+  }, [currentUser, refreshAllData]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('nirmaan_current_user');
+    setCurrentUser(null);
+    setCurrentBalance(null);
+  };
+
+  if (loading && !currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center text-white">
+        <RefreshCw className="w-8 h-8 animate-spin text-sky-400 mb-3" />
+        <p className="text-sm font-semibold tracking-wide">Initializing Nirmaan WaterTech Portal...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <LoginForm
+        onLoginSuccess={(user, balance) => {
+          setCurrentUser(user);
+          setCurrentBalance(balance);
+          localStorage.setItem('nirmaan_current_user', JSON.stringify(user));
+        }}
+      />
+    );
+  }
+
+  // Filter leaves for individual employees (Mahesh, Ritesh, Shubham)
+  const myLeaves = leaves.filter((l) => l.user_id === currentUser.id);
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+      {/* Top Navbar */}
+      <Navbar
+        currentUser={currentUser}
+        onOpenNotifications={() => setDrawerOpen(true)}
+        onOpenDailyDigest={() => setDigestModalOpen(true)}
+        unreadCount={unreadNotificationsCount}
+        onLogout={handleLogout}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {loading ? (
+          <div className="py-24 text-center text-slate-500">
+            <RefreshCw className="w-8 h-8 animate-spin mx-auto text-sky-600 mb-3" />
+            <p className="text-sm font-semibold">Loading Nirmaan WaterTech Leave Hub...</p>
+          </div>
+        ) : currentUser.role === 'DIRECTOR' ? (
+          /* DIRECTORS (Manav Shah D001 & Neer Savla D002) */
+          <DirectorDashboard
+            currentDirector={currentUser}
+            leaves={leaves}
+            employees={employees}
+            holidays={holidays}
+            onRefreshData={refreshAllData}
+            onOpenDigest={() => setDigestModalOpen(true)}
+          />
+        ) : currentUser.role === 'ADMIN' ? (
+          /* ADMIN (Payal Kadam EMP003) */
+          <AdminDashboard
+            currentAdmin={currentUser}
+            balance={currentBalance}
+            leaves={myLeaves}
+            allLeaves={leaves}
+            employees={employees}
+            holidays={holidays}
+            onRefreshData={refreshAllData}
+            onOpenNotifications={() => setDrawerOpen(true)}
+          />
+        ) : (
+          /* FIELD EMPLOYEES & SALES (Mahesh EMP001, Ritesh EMP002, Shubham EMP004) */
+          <EmployeeDashboard
+            currentUser={currentUser}
+            balance={currentBalance}
+            leaves={myLeaves}
+            allActiveLeaves={leaves.filter((l) => l.status === 'APPROVED' || l.status === 'PENDING')}
+            holidays={holidays}
+            onRefreshData={refreshAllData}
+          />
+        )}
       </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
+
+      {/* Live Director & Admin Notification Engine Drawer */}
+      <DirectorNotificationDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        targetUserId={currentUser.role === 'DIRECTOR' || currentUser.role === 'ADMIN' ? undefined : currentUser.employee_id}
+        onReviewLeave={(leaveId) => {
+          // If leaveId clicked in drawer, focus inbox
+          setDrawerOpen(false);
+          refreshAllData();
+        }}
+      />
+
+      {/* 9:00 AM Director Daily Digest Modal */}
+      <DailyDigestModal
+        isOpen={digestModalOpen}
+        onClose={() => setDigestModalOpen(false)}
+        onActionClick={(leaveId) => {
+          setDigestModalOpen(false);
+          refreshAllData();
+        }}
+      />
+
+      {/* Modern WaterTech Footer */}
+      <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 py-6 text-xs text-center">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <p>
+            &copy; {new Date().getFullYear()} <strong>Nirmaan WaterTech Private Limited</strong>. All rights reserved.
+          </p>
+          <div className="flex items-center gap-4 text-slate-400">
+            <span>Mumbai & Ahmedabad Facilities</span>
+            <span>•</span>
+            <span>Flat Startup Architecture</span>
+            <span>•</span>
+            <span className="text-sky-400">Production Ready</span>
+          </div>
+        </div>
       </footer>
     </div>
   );
