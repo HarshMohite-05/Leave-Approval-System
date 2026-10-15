@@ -126,6 +126,9 @@ function initTablesAndSeed(database: Database.Database) {
   `);
 
   // Seed default 6 users if users table is empty
+  // Policy: 12 casual + 12 sick per year, no paid leave (also fixes existing rows)
+  database.prepare('UPDATE leave_balances SET sl_allocated = 12, pl_allocated = 0 WHERE sl_allocated != 12 OR pl_allocated != 0').run();
+
   const count = (database.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
   if (count === 0) {
     const seedUsers = [
@@ -215,9 +218,6 @@ function initTablesAndSeed(database: Database.Database) {
     `);
 
     const currentYear = new Date().getFullYear();
-
-    // Policy: 12 casual + 12 sick per year, no paid leave
-    database.prepare('UPDATE leave_balances SET sl_allocated = 12, pl_allocated = 0 WHERE year = ?').run(currentYear);
 
     const insertUserTx = database.transaction(() => {
       for (const u of seedUsers) {
