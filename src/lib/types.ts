@@ -16,7 +16,7 @@ export interface User {
   created_at?: string;
 }
 
-export type LeaveType = 'CASUAL' | 'SICK' | 'PAID' | 'COMP_OFF' | 'UNPAID';
+export type LeaveType = 'CASUAL' | 'SICK' | 'COMP_OFF' | 'UNPAID';
 export type LeaveStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 export type HalfDayPeriod = 'FIRST_HALF' | 'SECOND_HALF';
 

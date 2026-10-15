@@ -122,9 +122,6 @@ export async function POST(req: NextRequest) {
         } else if (leave_type === 'SICK') {
           available = balance.sl_allocated - balance.sl_used - balance.sl_pending;
           pendingCol = 'sl_pending';
-        } else if (leave_type === 'PAID') {
-          available = balance.pl_allocated - balance.pl_used - balance.pl_pending;
-          pendingCol = 'pl_pending';
         } else if (leave_type === 'COMP_OFF') {
           available = balance.co_allocated - balance.co_used - balance.co_pending;
           pendingCol = 'co_pending';

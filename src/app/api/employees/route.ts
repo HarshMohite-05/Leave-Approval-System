@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
           sl_allocated, sl_used, sl_pending,
           pl_allocated, pl_used, pl_pending,
           co_allocated, co_used, co_pending, lop_days
-        ) VALUES (?, ?, 12, 0, 0, 8, 0, 0, 15, 0, 0, 0, 0, 0, 0)
+        ) VALUES (?, ?, 12, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0)
       `).run(userId, currentYear);
     });
 
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
       type: 'LEAVE_SUBMITTED',
       targetUserIds: ['D001', 'D002'],
       title: `👤 New Employee Onboarded: ${createdUser.name} (${createdUser.employee_id})`,
-      message: `${caller.name} added ${createdUser.name} as ${createdUser.designation}. Reporting directly to Directors with standard leave allocation (CL: 12, SL: 8, PL: 15).`,
+      message: `${caller.name} added ${createdUser.name} as ${createdUser.designation}. Reporting directly to Directors with standard leave allocation (CL: 12, SL: 12).`,
     });
 
     const { password: _, ...safe } = createdUser;

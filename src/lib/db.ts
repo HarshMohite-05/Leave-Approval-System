@@ -57,10 +57,10 @@ function initTablesAndSeed(database: Database.Database) {
       cl_allocated REAL DEFAULT 12,
       cl_used REAL DEFAULT 0,
       cl_pending REAL DEFAULT 0,
-      sl_allocated REAL DEFAULT 8,
+      sl_allocated REAL DEFAULT 12,
       sl_used REAL DEFAULT 0,
       sl_pending REAL DEFAULT 0,
-      pl_allocated REAL DEFAULT 15,
+      pl_allocated REAL DEFAULT 0,
       pl_used REAL DEFAULT 0,
       pl_pending REAL DEFAULT 0,
       co_allocated REAL DEFAULT 0,
@@ -216,12 +216,15 @@ function initTablesAndSeed(database: Database.Database) {
 
     const currentYear = new Date().getFullYear();
 
+    // Policy: 12 casual + 12 sick per year, no paid leave
+    database.prepare('UPDATE leave_balances SET sl_allocated = 12, pl_allocated = 0 WHERE year = ?').run(currentYear);
+
     const insertUserTx = database.transaction(() => {
       for (const u of seedUsers) {
         insertUser.run(u);
         database.prepare(`
           INSERT OR IGNORE INTO leave_balances (user_id, year, cl_allocated, cl_used, cl_pending, sl_allocated, sl_used, sl_pending, pl_allocated, pl_used, pl_pending, co_allocated, co_used, co_pending, lop_days)
-          VALUES (?, ?, 12, 0, 0, 8, 0, 0, 15, 0, 0, 0, 0, 0, 0)
+          VALUES (?, ?, 12, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         `).run(u.id, currentYear);
       }
     });

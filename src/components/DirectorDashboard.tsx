@@ -594,8 +594,6 @@ export default function DirectorDashboard({
                                 ? 'bg-sky-100 text-sky-800'
                                 : leave.leave_type === 'SICK'
                                 ? 'bg-purple-100 text-purple-800'
-                                : leave.leave_type === 'PAID'
-                                ? 'bg-emerald-100 text-emerald-800'
                                 : leave.leave_type === 'COMP_OFF'
                                 ? 'bg-indigo-100 text-indigo-800'
                                 : 'bg-slate-100 text-slate-800'
@@ -927,9 +925,6 @@ export default function DirectorDashboard({
                                 <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-800 font-medium text-[11px] border border-purple-200" title="Sick Leave">
                                   SL: {b.sl_allocated - b.sl_used - b.sl_pending}/{b.sl_allocated}
                                 </span>
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 font-medium text-[11px] border border-emerald-200" title="Paid Leave">
-                                  PL: {b.pl_allocated - b.pl_used - b.pl_pending}/{b.pl_allocated}
-                                </span>
                                 {b.co_allocated > 0 && (
                                   <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-800 font-bold text-[11px] border border-indigo-200" title="Comp-Off">
                                     CO: {b.co_allocated - b.co_used - b.co_pending}
@@ -998,7 +993,7 @@ export default function DirectorDashboard({
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-2">
               <p>✅ Generates standard HR & Payroll compliant CSV file.</p>
               <p>✅ Includes all 6 Nirmaan WaterTech personnel with reporting structure.</p>
-              <p>✅ Automatically breaks down Casual, Sick, Paid, and Loss of Pay (LOP) days.</p>
+              <p>✅ Automatically breaks down Casual, Sick, and Loss of Pay (LOP) days.</p>
             </div>
 
             <a
@@ -1220,7 +1215,7 @@ export default function DirectorDashboard({
               </div>
 
               <div className="p-3 bg-sky-50 rounded-xl text-[11px] text-sky-800 border border-sky-200">
-                ⚡ Initial annual balances will be auto-credited: <strong>12 Casual</strong>, <strong>8 Sick</strong>, and <strong>15 Paid Leaves</strong>.
+                ⚡ Initial annual balances will be auto-credited: <strong>12 Casual</strong> and <strong>12 Sick</strong> Leaves.
               </div>
 
               <div className="pt-2 flex items-center justify-end gap-2">

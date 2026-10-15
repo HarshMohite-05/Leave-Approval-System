@@ -78,9 +78,6 @@ export async function PATCH(
           } else if (leave.leave_type === 'SICK') {
             pendingCol = 'sl_pending';
             usedCol = 'sl_used';
-          } else if (leave.leave_type === 'PAID') {
-            pendingCol = 'pl_pending';
-            usedCol = 'pl_used';
           } else if (leave.leave_type === 'COMP_OFF') {
             pendingCol = 'co_pending';
             usedCol = 'co_used';
@@ -159,7 +156,6 @@ export async function PATCH(
           let pendingCol = '';
           if (leave.leave_type === 'CASUAL') pendingCol = 'cl_pending';
           else if (leave.leave_type === 'SICK') pendingCol = 'sl_pending';
-          else if (leave.leave_type === 'PAID') pendingCol = 'pl_pending';
           else if (leave.leave_type === 'COMP_OFF') pendingCol = 'co_pending';
 
           db.prepare(`

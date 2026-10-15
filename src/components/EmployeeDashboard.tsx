@@ -75,7 +75,6 @@ export default function EmployeeDashboard({
     if (!balance) return 0;
     if (leaveType === 'CASUAL') return balance.cl_allocated - balance.cl_used - balance.cl_pending;
     if (leaveType === 'SICK') return balance.sl_allocated - balance.sl_used - balance.sl_pending;
-    if (leaveType === 'PAID') return balance.pl_allocated - balance.pl_used - balance.pl_pending;
     if (leaveType === 'COMP_OFF') return balance.co_allocated - balance.co_used - balance.co_pending;
     return 999; // UNPAID
   }, [balance, leaveType]);
@@ -221,7 +220,7 @@ export default function EmployeeDashboard({
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Sick Leave (SL)</span>
             <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
-              8/yr
+              12/yr
             </span>
           </div>
           <div className="flex items-baseline gap-1.5">
@@ -233,26 +232,6 @@ export default function EmployeeDashboard({
           <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
             <span>Used: <strong>{balance?.sl_used || 0}</strong></span>
             <span>Pending: <strong className="text-amber-600">{balance?.sl_pending || 0}</strong></span>
-          </div>
-        </div>
-
-        {/* Paid Leave */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Paid Leave (PL)</span>
-            <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-              15/yr
-            </span>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-3xl font-extrabold text-slate-900">
-              {balance ? balance.pl_allocated - balance.pl_used - balance.pl_pending : 0}
-            </span>
-            <span className="text-xs text-slate-400 font-medium">days left</span>
-          </div>
-          <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-            <span>Used: <strong>{balance?.pl_used || 0}</strong></span>
-            <span>Pending: <strong className="text-amber-600">{balance?.pl_pending || 0}</strong></span>
           </div>
         </div>
 
@@ -463,7 +442,7 @@ export default function EmployeeDashboard({
               <div>
                 <label className="font-bold text-slate-700 block mb-1">Leave Category</label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {(['CASUAL', 'SICK', 'PAID', 'COMP_OFF'] as const).map((type) => (
+                  {(['CASUAL', 'SICK', 'COMP_OFF'] as const).map((type) => (
                     <button
                       key={type}
                       type="button"
