@@ -17,8 +17,15 @@ export const metadata: Metadata = {
   title: "Nirmaan WaterTech | Leave & Approval Management System",
   description:
     "Production-grade Leave & Approval Management Web Application for Nirmaan WaterTech. Flat Startup Hierarchy with Director Executive Dashboard, Critical Technician Overlap Alerts, and Real-Time Attendance.",
+  manifest: "/manifest.json",
   icons: {
     icon: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "Leave Hub",
+    statusBarStyle: "black-translucent",
   },
 };
 

@@ -114,3 +114,48 @@ export async function unsubscribeFromPush(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Keeps this device's subscription valid and linked to the logged-in user.
+ * Runs silently on every login/app open (never prompts): re-registers with the
+ * server, and replaces subscriptions created with an outdated VAPID key.
+ */
+export async function syncPushSubscription(userId: string): Promise<void> {
+  if (!isPushSupported() || Notification.permission !== 'granted') return;
+  try {
+    const reg = await registerServiceWorker();
+    if (!reg) return;
+
+    const keyRes = await fetch('/api/push/public-key');
+    const { publicKey } = await keyRes.json();
+    if (!publicKey) return;
+
+    let subscription = await reg.pushManager.getSubscription();
+    if (subscription) {
+      const current = subscription.options?.applicationServerKey;
+      const expected = urlBase64ToUint8Array(publicKey);
+      const same =
+        current &&
+        new Uint8Array(current).length === expected.length &&
+        new Uint8Array(current).every((b, i) => b === expected[i]);
+      if (!same) {
+        await subscription.unsubscribe();
+        subscription = null;
+      }
+    }
+    if (!subscription) {
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(publicKey) as unknown as BufferSource,
+      });
+    }
+
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, subscription: subscription.toJSON() }),
+    });
+  } catch (err) {
+    console.error('Push sync failed:', err);
+  }
+}

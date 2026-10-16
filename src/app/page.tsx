@@ -10,6 +10,7 @@ import DirectorNotificationDrawer from '@/components/DirectorNotificationDrawer'
 import DailyDigestModal from '@/components/DailyDigestModal';
 import { User, LeaveBalance, LeaveRequest, Holiday } from '@/lib/types';
 import { RefreshCw } from 'lucide-react';
+import { syncPushSubscription } from '@/lib/push-client';
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -88,6 +89,11 @@ export default function Home() {
       refreshAllData();
     }
   }, [currentUser, refreshAllData]);
+
+  // Re-link this device's push subscription to whoever is logged in
+  useEffect(() => {
+    if (currentUser) syncPushSubscription(currentUser.id);
+  }, [currentUser]);
 
   // Live updates: poll every 15s and refresh when the tab regains focus
   useEffect(() => {
