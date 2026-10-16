@@ -4,7 +4,7 @@ import { Holiday, User } from '@/lib/types';
 
 export async function GET() {
   try {
-    const holidays = db
+    const holidays = await db
       .prepare('SELECT * FROM holidays ORDER BY date ASC')
       .all() as Holiday[];
     return NextResponse.json({ holidays });
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { caller_id, name, date, is_optional } = body;
 
-    const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(caller_id) as User | undefined;
+    const caller = await db.prepare('SELECT * FROM users WHERE id = ?').get(caller_id) as User | undefined;
     if (!caller || (caller.role !== 'DIRECTOR' && caller.role !== 'ADMIN')) {
       return NextResponse.json(
         { error: 'Forbidden: Only Directors or Admin can manage company holidays.' },
@@ -34,12 +34,12 @@ export async function POST(req: NextRequest) {
     }
 
     const id = `hol_${Date.now()}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO holidays (id, name, date, is_optional)
       VALUES (?, ?, ?, ?)
     `).run(id, name.trim(), date.trim(), is_optional ? 1 : 0);
 
-    const holiday = db.prepare('SELECT * FROM holidays WHERE id = ?').get(id);
+    const holiday = await db.prepare('SELECT * FROM holidays WHERE id = ?').get(id);
     return NextResponse.json({ success: true, holiday });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -52,7 +52,7 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get('id');
     const callerId = searchParams.get('caller_id');
 
-    const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(callerId) as User | undefined;
+    const caller = await db.prepare('SELECT * FROM users WHERE id = ?').get(callerId) as User | undefined;
     if (!caller || (caller.role !== 'DIRECTOR' && caller.role !== 'ADMIN')) {
       return NextResponse.json(
         { error: 'Forbidden: Only Directors or Admin can manage company holidays.' },
@@ -64,7 +64,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Holiday ID required' }, { status: 400 });
     }
 
-    db.prepare('DELETE FROM holidays WHERE id = ?').run(id);
+    await db.prepare('DELETE FROM holidays WHERE id = ?').run(id);
     return NextResponse.json({ success: true, message: 'Holiday deleted' });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });

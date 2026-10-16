@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     query += ' ORDER BY created_at DESC';
 
-    const leaves = db.prepare(query).all(...params) as LeaveRequest[];
+    const leaves = await db.prepare(query).all(...params) as LeaveRequest[];
     return NextResponse.json({ leaves });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -61,13 +61,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(user_id) as User | undefined;
+    const user = await db.prepare('SELECT * FROM users WHERE id = ?').get(user_id) as User | undefined;
     if (!user) {
       return NextResponse.json({ error: 'Applicant user not found' }, { status: 404 });
     }
 
     // Fetch public holidays
-    const holidays = db.prepare('SELECT date FROM holidays').all() as Holiday[];
+    const holidays = await db.prepare('SELECT date FROM holidays').all() as Holiday[];
     const holidayDates = holidays.map((h) => h.date);
 
     // Calculate smart working days (excluding Sundays and holidays)
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     const isSameDay = isSameDayLeave(start_date);
 
     // Active leaves for overlap calculation
-    const allActiveLeaves = db
+    const allActiveLeaves = await db
       .prepare("SELECT * FROM leave_requests WHERE status IN ('APPROVED', 'PENDING')")
       .all() as LeaveRequest[];
 
@@ -101,9 +101,9 @@ export async function POST(req: NextRequest) {
     // Check and lock balance inside atomic transaction
     const leaveId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-    const createLeaveTx = db.transaction(() => {
+    const createLeaveTx = () => db.transaction(async (tx) => {
       // 1. Fetch balance
-      const balance = db
+      const balance = await tx
         .prepare('SELECT * FROM leave_balances WHERE user_id = ? AND year = ?')
         .get(user.id, currentYear) as LeaveBalance | undefined;
 
@@ -134,13 +134,13 @@ export async function POST(req: NextRequest) {
         }
 
         // Lock days in pending
-        db.prepare(
+        await tx.prepare(
           `UPDATE leave_balances SET ${pendingCol} = ${pendingCol} + ? WHERE user_id = ? AND year = ?`
         ).run(totalDays, user.id, currentYear);
       }
 
       // 2. Insert leave request
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO leave_requests (
           id, user_id, employee_id, employee_name, designation, leave_type,
           start_date, end_date, is_half_day, half_day_period, total_days,
@@ -169,14 +169,14 @@ export async function POST(req: NextRequest) {
       );
     });
 
-    createLeaveTx();
+    await createLeaveTx();
 
-    const createdLeave = db
+    const createdLeave = await db
       .prepare('SELECT * FROM leave_requests WHERE id = ?')
       .get(leaveId) as LeaveRequest;
 
     // Trigger Director Notification Engine
-    NotificationService.notifyDirectorsNewLeave(
+    await NotificationService.notifyDirectorsNewLeave(
       createdLeave,
       overlapResult.hasOverlap,
       overlapResult.message

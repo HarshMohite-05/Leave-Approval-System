@@ -12,7 +12,7 @@ export async function PATCH(
     const body = await req.json();
     const { caller_id, action, password, contact, designation, comp_off_reason } = body;
 
-    const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(caller_id) as User | undefined;
+    const caller = await db.prepare('SELECT * FROM users WHERE id = ?').get(caller_id) as User | undefined;
     if (!caller || caller.role !== 'DIRECTOR') {
       return NextResponse.json(
         { error: 'Forbidden: Only Directors have permission to modify employee credentials or balances.' },
@@ -20,7 +20,7 @@ export async function PATCH(
       );
     }
 
-    const employee = db.prepare('SELECT * FROM users WHERE id = ?').get(employeeUserId) as User | undefined;
+    const employee = await db.prepare('SELECT * FROM users WHERE id = ?').get(employeeUserId) as User | undefined;
     if (!employee) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
@@ -29,7 +29,7 @@ export async function PATCH(
 
     if (action === 'GRANT_COMP_OFF') {
       // Grant +1 day comp-off
-      db.prepare(`
+      await db.prepare(`
         UPDATE leave_balances
         SET co_allocated = co_allocated + 1
         WHERE user_id = ? AND year = ?
@@ -42,7 +42,7 @@ export async function PATCH(
         message: `Director ${caller.name} has credited 1 day Comp-Off to ${employee.name}.${comp_off_reason ? ` Reason: "${comp_off_reason}"` : ''}`,
       });
 
-      const updatedBalance = db
+      const updatedBalance = await db
         .prepare('SELECT * FROM leave_balances WHERE user_id = ? AND year = ?')
         .get(employee.id, currentYear);
 
@@ -72,10 +72,10 @@ export async function PATCH(
 
     if (updates.length > 0) {
       updateParams.push(employee.id);
-      db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...updateParams);
+      await db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...updateParams);
     }
 
-    const updatedUser = db.prepare('SELECT * FROM users WHERE id = ?').get(employee.id) as User;
+    const updatedUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(employee.id) as User;
     const { password: _, ...safe } = updatedUser;
 
     return NextResponse.json({
@@ -97,7 +97,7 @@ export async function DELETE(
     const { searchParams } = new URL(req.url);
     const callerId = searchParams.get('caller_id');
 
-    const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(callerId) as User | undefined;
+    const caller = await db.prepare('SELECT * FROM users WHERE id = ?').get(callerId) as User | undefined;
     if (!caller || caller.role !== 'DIRECTOR') {
       return NextResponse.json(
         { error: 'Forbidden: Only Directors can remove employees from the active roster.' },
@@ -105,7 +105,7 @@ export async function DELETE(
       );
     }
 
-    const employee = db.prepare('SELECT * FROM users WHERE id = ?').get(employeeUserId) as User | undefined;
+    const employee = await db.prepare('SELECT * FROM users WHERE id = ?').get(employeeUserId) as User | undefined;
     if (!employee) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
@@ -118,10 +118,10 @@ export async function DELETE(
     }
 
     // Soft delete by setting status to INACTIVE so history is preserved
-    db.prepare("UPDATE users SET status = 'INACTIVE' WHERE id = ?").run(employee.id);
+    await db.prepare("UPDATE users SET status = 'INACTIVE' WHERE id = ?").run(employee.id);
 
     // Cancel any pending leaves
-    db.prepare("UPDATE leave_requests SET status = 'CANCELLED' WHERE user_id = ? AND status = 'PENDING'").run(employee.id);
+    await db.prepare("UPDATE leave_requests SET status = 'CANCELLED' WHERE user_id = ? AND status = 'PENDING'").run(employee.id);
 
     NotificationService.dispatch({
       type: 'LEAVE_CANCELLED',

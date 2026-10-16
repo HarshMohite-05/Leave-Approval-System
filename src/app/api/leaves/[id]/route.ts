@@ -19,7 +19,7 @@ export async function PATCH(
       );
     }
 
-    const leave = db
+    const leave = await db
       .prepare('SELECT * FROM leave_requests WHERE id = ?')
       .get(leaveId) as LeaveRequest | undefined;
 
@@ -27,7 +27,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Leave request not found' }, { status: 404 });
     }
 
-    const actor = db.prepare('SELECT * FROM users WHERE id = ?').get(actor_id) as
+    const actor = await db.prepare('SELECT * FROM users WHERE id = ?').get(actor_id) as
       | User
       | undefined;
 
@@ -59,9 +59,9 @@ export async function PATCH(
       const isApprove = action === 'APPROVE';
       const targetStatus = isApprove ? 'APPROVED' : 'REJECTED';
 
-      const decisionTx = db.transaction(() => {
+      const decisionTx = () => db.transaction(async (tx) => {
         // Update leave request
-        db.prepare(`
+        await tx.prepare(`
           UPDATE leave_requests
           SET status = ?, action_by_id = ?, action_by_name = ?, action_at = CURRENT_TIMESTAMP, action_remarks = ?
           WHERE id = ?
@@ -85,7 +85,7 @@ export async function PATCH(
 
           if (isApprove) {
             // Pending -> Used
-            db.prepare(`
+            await tx.prepare(`
               UPDATE leave_balances
               SET ${pendingCol} = MAX(0, ${pendingCol} - ?),
                   ${usedCol} = ${usedCol} + ?
@@ -93,7 +93,7 @@ export async function PATCH(
             `).run(leave.total_days, leave.total_days, leave.user_id, currentYear);
           } else {
             // Reject: Release pending back to available
-            db.prepare(`
+            await tx.prepare(`
               UPDATE leave_balances
               SET ${pendingCol} = MAX(0, ${pendingCol} - ?)
               WHERE user_id = ? AND year = ?
@@ -101,7 +101,7 @@ export async function PATCH(
           }
         } else if (isApprove) {
           // If UNPAID and approved, record LOP days
-          db.prepare(`
+          await tx.prepare(`
             UPDATE leave_balances
             SET lop_days = lop_days + ?
             WHERE user_id = ? AND year = ?
@@ -109,14 +109,14 @@ export async function PATCH(
         }
       });
 
-      decisionTx();
+      await decisionTx();
 
-      const updatedLeave = db
+      const updatedLeave = await db
         .prepare('SELECT * FROM leave_requests WHERE id = ?')
         .get(leave.id) as LeaveRequest;
 
       // Trigger multi-channel Notification
-      NotificationService.notifyLeaveDecision(
+      await NotificationService.notifyLeaveDecision(
         updatedLeave,
         targetStatus as 'APPROVED' | 'REJECTED',
         actor.name,
@@ -144,8 +144,8 @@ export async function PATCH(
         );
       }
 
-      const cancelTx = db.transaction(() => {
-        db.prepare(`
+      const cancelTx = () => db.transaction(async (tx) => {
+        await tx.prepare(`
           UPDATE leave_requests
           SET status = 'CANCELLED', action_at = CURRENT_TIMESTAMP, action_remarks = ?
           WHERE id = ?
@@ -158,7 +158,7 @@ export async function PATCH(
           else if (leave.leave_type === 'SICK') pendingCol = 'sl_pending';
           else if (leave.leave_type === 'COMP_OFF') pendingCol = 'co_pending';
 
-          db.prepare(`
+          await tx.prepare(`
             UPDATE leave_balances
             SET ${pendingCol} = MAX(0, ${pendingCol} - ?)
             WHERE user_id = ? AND year = ?
@@ -166,9 +166,9 @@ export async function PATCH(
         }
       });
 
-      cancelTx();
+      await cancelTx();
 
-      const cancelledLeave = db
+      const cancelledLeave = await db
         .prepare('SELECT * FROM leave_requests WHERE id = ?')
         .get(leave.id) as LeaveRequest;
 

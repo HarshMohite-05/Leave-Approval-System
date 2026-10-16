@@ -15,12 +15,12 @@ export class NotificationService {
   /**
    * Records notification in DB and dispatches via in-app & Web Push
    */
-  static dispatch(params: DispatchNotificationParams): NotificationItem {
+  static async dispatch(params: DispatchNotificationParams): Promise<NotificationItem> {
     const id = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const targetsStr = params.targetUserIds.join(',');
     const metadataStr = params.metadata ? JSON.stringify(params.metadata) : null;
 
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO notifications (id, target_user_ids, type, title, message, leave_request_id, metadata)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, targetsStr, params.type, params.title, params.message, params.leaveRequestId || null, metadataStr);
@@ -43,11 +43,11 @@ export class NotificationService {
   /**
    * Alert Directors and Admin on a new submission via In-App & Web Push
    */
-  static notifyDirectorsNewLeave(leave: LeaveRequest, hasTechnicianOverlap: boolean, overlapMsg?: string) {
+  static async notifyDirectorsNewLeave(leave: LeaveRequest, hasTechnicianOverlap: boolean, overlapMsg?: string) {
     const urgency = leave.is_same_day ? '🚨 [SAME-DAY URGENT] ' : '';
     const overlapAlert = hasTechnicianOverlap ? ' ⚠️ [CRITICAL OVERLAP] ' : '';
 
-    this.dispatch({
+    await this.dispatch({
       type: hasTechnicianOverlap ? 'TECHNICIAN_OVERLAP' : 'LEAVE_SUBMITTED',
       targetUserIds: ['D001', 'D002', 'EMP003'],
       title: `${urgency}${overlapAlert}New Leave Request: ${leave.employee_name} (${leave.designation})`,
@@ -65,7 +65,7 @@ export class NotificationService {
     });
 
     // Dispatch real-time Mobile & Browser Web Push Notification to Directors & Admin
-    WebPushService.sendPushToUsers(['D001', 'D002', 'EMP003'], {
+    await WebPushService.sendPushToUsers(['D001', 'D002', 'EMP003'], {
       title: `${urgency}${overlapAlert}Leave Request: ${leave.employee_name}`,
       body: `${leave.employee_name} (${leave.designation}) requested ${leave.total_days}d ${leave.leave_type} (${leave.start_date} to ${leave.end_date}). Reason: "${leave.reason}".${overlapMsg ? ` ${overlapMsg}` : ''}`,
       url: '/',
@@ -76,7 +76,7 @@ export class NotificationService {
   /**
    * Alert employee, Directors, and Admin on Approval / Rejection via In-App & Web Push
    */
-  static notifyLeaveDecision(
+  static async notifyLeaveDecision(
     leave: LeaveRequest,
     decision: 'APPROVED' | 'REJECTED',
     approverName: string,
@@ -92,7 +92,7 @@ export class NotificationService {
       : `Your leave request for ${leave.start_date} to ${leave.end_date} was not approved by ${approverName}.${remarks ? ` Remarks: "${remarks}"` : ''}`;
 
     // 1. Notify Applicant Employee
-    this.dispatch({
+    await this.dispatch({
       type: isApproved ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
       targetUserIds: [leave.employee_id],
       title,
@@ -106,7 +106,7 @@ export class NotificationService {
     });
 
     // 2. Notify Both Directors and Admin for company synchronization
-    this.dispatch({
+    await this.dispatch({
       type: isApproved ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
       targetUserIds: ['D001', 'D002', 'EMP003'],
       title: `[Sync Alert] ${leave.employee_name}'s request ${decision} by ${approverName}`,
@@ -118,7 +118,7 @@ export class NotificationService {
     });
 
     // Dispatch real-time Mobile & Browser Web Push Notification
-    WebPushService.sendPushToUsers([leave.employee_id, 'D001', 'D002', 'EMP003'], {
+    await WebPushService.sendPushToUsers([leave.employee_id, 'D001', 'D002', 'EMP003'], {
       title: `${isApproved ? '✅ Leave Approved' : '❌ Leave Rejected'}: ${leave.employee_name}`,
       body: `${leave.employee_name}'s request for ${leave.total_days}d (${leave.start_date} to ${leave.end_date}) was ${decision.toLowerCase()} by ${approverName}.${remarks ? ` "${remarks}"` : ''}`,
       url: '/',

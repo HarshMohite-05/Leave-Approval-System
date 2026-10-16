@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    WebPushService.saveSubscription(userId, subscription);
+    await WebPushService.saveSubscription(userId, subscription);
     return NextResponse.json({ success: true, message: 'Push subscription registered successfully' });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -26,7 +26,7 @@ export async function DELETE(req: NextRequest) {
     const { endpoint } = body;
 
     if (endpoint) {
-      WebPushService.removeSubscription(endpoint);
+      await WebPushService.removeSubscription(endpoint);
     }
     return NextResponse.json({ success: true });
   } catch (err: any) {

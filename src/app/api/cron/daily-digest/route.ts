@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { LeaveRequest, User, DailyDigest } from '@/lib/types';
 import { format, addDays } from 'date-fns';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const today = new Date();
@@ -10,7 +12,7 @@ export async function GET(req: NextRequest) {
     const tomorrowStr = format(addDays(today, 1), 'yyyy-MM-dd');
 
     // 1. Fetch approved leaves covering today or tomorrow
-    const approvedLeaves = db
+    const approvedLeaves = await db
       .prepare(`
         SELECT * FROM leave_requests
         WHERE status = 'APPROVED'
@@ -53,7 +55,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 2. Compute Department Coverage
-    const activeStaff = db
+    const activeStaff = await db
       .prepare("SELECT * FROM users WHERE status = 'ACTIVE' AND role != 'DIRECTOR'")
       .all() as User[];
 
@@ -69,7 +71,7 @@ export async function GET(req: NextRequest) {
     const totalWorkingStaff = activeStaff.filter((u) => !todayLeaveEmpIds.has(u.employee_id)).length;
 
     // 3. Pending requests awaiting Director action
-    const pendingRequests = db
+    const pendingRequests = await db
       .prepare("SELECT * FROM leave_requests WHERE status = 'PENDING' ORDER BY is_same_day DESC, created_at ASC")
       .all() as LeaveRequest[];
 

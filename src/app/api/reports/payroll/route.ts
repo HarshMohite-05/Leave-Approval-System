@@ -8,12 +8,12 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const month = searchParams.get('month') || format(new Date(), 'yyyy-MM');
 
-    const users = db
+    const users = await db
       .prepare("SELECT * FROM users WHERE status = 'ACTIVE' ORDER BY role ASC, employee_id ASC")
       .all() as User[];
 
     const currentYear = parseInt(month.split('-')[0], 10) || new Date().getFullYear();
-    const balances = db
+    const balances = await db
       .prepare('SELECT * FROM leave_balances WHERE year = ?')
       .all(currentYear) as LeaveBalance[];
 
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Approved leaves in this month
-    const leavesInMonth = db
+    const leavesInMonth = await db
       .prepare(`
         SELECT * FROM leave_requests
         WHERE status = 'APPROVED'

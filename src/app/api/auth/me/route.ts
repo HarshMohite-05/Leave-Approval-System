@@ -17,13 +17,13 @@ export async function GET(req: NextRequest) {
       : 'SELECT * FROM users WHERE id = ?';
     const param = employeeId || userId;
 
-    const user = db.prepare(query).get(param) as User | undefined;
+    const user = await db.prepare(query).get(param) as User | undefined;
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     const currentYear = new Date().getFullYear();
-    const balance = db
+    const balance = await db
       .prepare('SELECT * FROM leave_balances WHERE user_id = ? AND year = ?')
       .get(user.id, currentYear);
 

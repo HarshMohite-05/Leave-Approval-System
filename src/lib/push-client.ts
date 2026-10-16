@@ -56,6 +56,9 @@ export async function subscribeToPush(userId: string): Promise<{ success: boolea
     // Fetch public VAPID key
     const keyRes = await fetch('/api/push/public-key');
     const { publicKey } = await keyRes.json();
+    if (!publicKey) {
+      return { success: false, error: 'Push service is not configured on the server (missing VAPID keys).' };
+    }
 
     const applicationServerKey = urlBase64ToUint8Array(publicKey);
 

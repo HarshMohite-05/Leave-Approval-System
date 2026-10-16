@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     const cleanIdentifier = identifier.trim().toLowerCase();
 
     // Query user by either employee_id OR email
-    const user = db
+    const user = await db
       .prepare(`
         SELECT * FROM users
         WHERE LOWER(employee_id) = ? OR LOWER(email) = ?
@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
 
     // Fetch user's leave balance
     const currentYear = new Date().getFullYear();
-    const balance = db
+    const balance = await db
       .prepare('SELECT * FROM leave_balances WHERE user_id = ? AND year = ?')
       .get(user.id, currentYear);
 

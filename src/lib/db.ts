@@ -1,40 +1,103 @@
-import Database from 'better-sqlite3';
+import { createClient, Client, InStatement } from '@libsql/client';
 import path from 'path';
 import fs from 'fs';
-import { User, LeaveBalance, LeaveRequest, Holiday, NotificationItem } from './types';
 
-const isVercel = process.env.VERCEL === '1';
-const DB_PATH = isVercel
-  ? path.join('/tmp', 'nirmaan_leave.db')
-  : path.join(process.cwd(), 'data', 'nirmaan_leave.db');
-
-// Ensure data directory exists
-const dir = path.dirname(DB_PATH);
-if (!fs.existsSync(dir)) {
-  fs.mkdirSync(dir, { recursive: true });
+// Hosted Turso/libSQL when TURSO_DATABASE_URL is set; otherwise a local SQLite file.
+// (On Vercel without Turso the file lives in /tmp and is wiped on cold starts.)
+function resolveConfig() {
+  if (process.env.TURSO_DATABASE_URL) {
+    return { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN };
+  }
+  const file =
+    process.env.VERCEL === '1'
+      ? path.join('/tmp', 'nirmaan_leave.db')
+      : path.join(process.cwd(), 'data', 'nirmaan_leave.db');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return { url: `file:${file}`, authToken: undefined };
 }
 
-// Global DB instance caching for Next.js hot reloading
+type Params = unknown[];
+type Executor = { execute: (stmt: InStatement) => ReturnType<Client['execute']> };
+
+function statement(executor: Executor, sql: string) {
+  const exec = (params: Params) => executor.execute({ sql, args: params as any });
+  return {
+    async get(...params: Params): Promise<any> {
+      return (await exec(params)).rows[0] as any;
+    },
+    async all(...params: Params): Promise<any[]> {
+      return (await exec(params)).rows as any[];
+    },
+    async run(...params: Params) {
+      const r = await exec(params);
+      return { changes: r.rowsAffected };
+    },
+  };
+}
+
+export interface Tx {
+  prepare: (sql: string) => ReturnType<typeof statement>;
+}
+
 declare global {
   // eslint-disable-next-line no-var
-  var __nirmaan_db: Database.Database | undefined;
+  var __nirmaan_db: Db | undefined;
 }
 
-function getDatabase(): Database.Database {
+function buildDb(client: Client, ready: Promise<void> | null) {
+  const wait = async () => {
+    if (ready) await ready;
+  };
+  return {
+    prepare(sql: string) {
+      const base = statement(client, sql);
+      return {
+        get: async (...p: Params) => (await wait(), base.get(...p)),
+        all: async (...p: Params) => (await wait(), base.all(...p)),
+        run: async (...p: Params) => (await wait(), base.run(...p)),
+      };
+    },
+    async exec(sql: string) {
+      await client.executeMultiple(sql);
+    },
+    /** Runs fn atomically. Use the `tx` argument for all queries inside. */
+    async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      await wait();
+      const t = await client.transaction('write');
+      try {
+        const result = await fn({ prepare: (sql) => statement(t, sql) });
+        await t.commit();
+        return result;
+      } catch (err) {
+        await t.rollback();
+        throw err;
+      } finally {
+        t.close();
+      }
+    },
+  };
+}
+
+type Db = ReturnType<typeof buildDb>;
+
+function getDatabase(): Db {
   if (!global.__nirmaan_db) {
-    const db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    initTablesAndSeed(db);
-    global.__nirmaan_db = db;
+    const client = createClient(resolveConfig());
+    const raw = buildDb(client, null);
+    const ready = client.execute('PRAGMA foreign_keys = ON').then(() => initTablesAndSeed(raw));
+    global.__nirmaan_db = buildDb(client, ready);
   }
   return global.__nirmaan_db;
 }
 
-export const db = getDatabase();
+export const db: Db = {
+  prepare: (sql) => getDatabase().prepare(sql),
+  exec: (sql) => getDatabase().exec(sql),
+  transaction: (fn) => getDatabase().transaction(fn),
+};
 
-function initTablesAndSeed(database: Database.Database) {
-  database.exec(`
+async function initTablesAndSeed(database: Db) {
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       employee_id TEXT UNIQUE NOT NULL,
@@ -127,9 +190,9 @@ function initTablesAndSeed(database: Database.Database) {
 
   // Seed default 6 users if users table is empty
   // Policy: 12 casual + 12 sick per year, no paid leave (also fixes existing rows)
-  database.prepare('UPDATE leave_balances SET sl_allocated = 12, pl_allocated = 0 WHERE sl_allocated != 12 OR pl_allocated != 0').run();
+  await database.prepare('UPDATE leave_balances SET sl_allocated = 12, pl_allocated = 0 WHERE sl_allocated != 12 OR pl_allocated != 0').run();
 
-  const count = (database.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
+  const count = ((await database.prepare('SELECT COUNT(*) as count FROM users').get()) as { count: number }).count;
   if (count === 0) {
     const seedUsers = [
       {
@@ -212,23 +275,20 @@ function initTablesAndSeed(database: Database.Database) {
       },
     ];
 
-    const insertUser = database.prepare(`
-      INSERT OR IGNORE INTO users (id, employee_id, name, role, designation, department, reports_to, contact, email, password, avatar_color)
-      VALUES (@id, @employee_id, @name, @role, @designation, @department, @reports_to, @contact, @email, @password, @avatar_color)
-    `);
-
     const currentYear = new Date().getFullYear();
 
-    const insertUserTx = database.transaction(() => {
+    await database.transaction(async (tx) => {
       for (const u of seedUsers) {
-        insertUser.run(u);
-        database.prepare(`
+        await tx.prepare(`
+          INSERT OR IGNORE INTO users (id, employee_id, name, role, designation, department, reports_to, contact, email, password, avatar_color)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(u.id, u.employee_id, u.name, u.role, u.designation, u.department, u.reports_to, u.contact, u.email, u.password, u.avatar_color);
+        await tx.prepare(`
           INSERT OR IGNORE INTO leave_balances (user_id, year, cl_allocated, cl_used, cl_pending, sl_allocated, sl_used, sl_pending, pl_allocated, pl_used, pl_pending, co_allocated, co_used, co_pending, lop_days)
           VALUES (?, ?, 12, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0)
         `).run(u.id, currentYear);
       }
     });
-    insertUserTx();
 
     // Seed Public Holidays
     const holidays = [
@@ -242,11 +302,10 @@ function initTablesAndSeed(database: Database.Database) {
       { id: 'hol_8', name: 'Christmas Day', date: `${currentYear}-12-25`, is_optional: 0 },
     ];
 
-    const insertHoliday = database.prepare(
-      'INSERT OR IGNORE INTO holidays (id, name, date, is_optional) VALUES (?, ?, ?, ?)'
-    );
     for (const h of holidays) {
-      insertHoliday.run(h.id, h.name, h.date, h.is_optional);
+      await database
+        .prepare('INSERT OR IGNORE INTO holidays (id, name, date, is_optional) VALUES (?, ?, ?, ?)')
+        .run(h.id, h.name, h.date, h.is_optional);
     }
   }
 }

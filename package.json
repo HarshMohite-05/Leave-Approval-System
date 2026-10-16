@@ -9,9 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@types/better-sqlite3": "^9.6.0",
+    "@libsql/client": "^0.18.0",
     "@types/canvas-confetti": "^1.9.0",
-    "better-sqlite3": "^13.0.3",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "date-fns": "^4.4.0",

@@ -5,12 +5,12 @@ import { NotificationService } from '@/lib/notifications';
 
 export async function GET(req: NextRequest) {
   try {
-    const users = db
+    const users = await db
       .prepare("SELECT * FROM users ORDER BY CASE WHEN role = 'DIRECTOR' THEN 0 WHEN role = 'ADMIN' THEN 1 ELSE 2 END, employee_id ASC")
       .all() as User[];
 
     const currentYear = new Date().getFullYear();
-    const balances = db
+    const balances = await db
       .prepare('SELECT * FROM leave_balances WHERE year = ?')
       .all(currentYear) as LeaveBalance[];
 
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
     } = body;
 
     // Strict Hierarchy Check: Only Directors can add employees
-    const caller = db.prepare('SELECT * FROM users WHERE id = ?').get(caller_id) as User | undefined;
+    const caller = await db.prepare('SELECT * FROM users WHERE id = ?').get(caller_id) as User | undefined;
     if (!caller || caller.role !== 'DIRECTOR') {
       return NextResponse.json(
         { error: 'Forbidden: Only Nirmaan WaterTech Directors can add new employees to the roster.' },
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     // Auto-generate employee_id if not provided or empty
     let empId = employee_id ? employee_id.trim().toUpperCase() : '';
     if (!empId) {
-      const existingEmps = db
+      const existingEmps = await db
         .prepare("SELECT employee_id FROM users WHERE employee_id LIKE 'EMP%'")
         .all() as { employee_id: string }[];
       let maxNum = 4;
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Check unique employee_id or email
-    const duplicate = db
+    const duplicate = await db
       .prepare('SELECT id FROM users WHERE LOWER(employee_id) = ? OR LOWER(email) = ?')
       .get(empId.toLowerCase(), email.trim().toLowerCase());
 
@@ -111,8 +111,8 @@ export async function POST(req: NextRequest) {
     ];
     const avatarColor = avatarColors[Math.floor(Math.random() * avatarColors.length)];
 
-    const addEmployeeTx = db.transaction(() => {
-      db.prepare(`
+    const addEmployeeTx = () => db.transaction(async (tx) => {
+      await tx.prepare(`
         INSERT INTO users (id, employee_id, name, role, designation, department, reports_to, contact, email, password, avatar_color)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
         avatarColor
       );
 
-      db.prepare(`
+      await tx.prepare(`
         INSERT INTO leave_balances (
           user_id, year, cl_allocated, cl_used, cl_pending,
           sl_allocated, sl_used, sl_pending,
@@ -139,10 +139,10 @@ export async function POST(req: NextRequest) {
       `).run(userId, currentYear);
     });
 
-    addEmployeeTx();
+    await addEmployeeTx();
 
-    const createdUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User;
-    const balance = db.prepare('SELECT * FROM leave_balances WHERE user_id = ? AND year = ?').get(userId, currentYear);
+    const createdUser = await db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as User;
+    const balance = await db.prepare('SELECT * FROM leave_balances WHERE user_id = ? AND year = ?').get(userId, currentYear);
 
     // Notify Directors
     NotificationService.dispatch({

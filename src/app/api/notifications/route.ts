@@ -17,10 +17,10 @@ export async function GET(req: NextRequest) {
 
     query += ' ORDER BY created_at DESC LIMIT 50';
 
-    const notifications = db.prepare(query).all(...params) as NotificationItem[];
+    const notifications = await db.prepare(query).all(...params) as NotificationItem[];
     const countStmt = targetUserId
-      ? db.prepare('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0 AND target_user_ids LIKE ?').get(`%${targetUserId}%`)
-      : db.prepare('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0').get();
+      ? await db.prepare('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0 AND target_user_ids LIKE ?').get(`%${targetUserId}%`)
+      : await db.prepare('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0').get();
     const unreadCount = countStmt as { count: number };
 
     return NextResponse.json({
@@ -39,12 +39,12 @@ export async function PATCH(req: NextRequest) {
 
     if (mark_all) {
       if (user_id) {
-        db.prepare("UPDATE notifications SET is_read = 1 WHERE target_user_ids LIKE ?").run(`%${user_id}%`);
+        await db.prepare("UPDATE notifications SET is_read = 1 WHERE target_user_ids LIKE ?").run(`%${user_id}%`);
       } else {
-        db.prepare('UPDATE notifications SET is_read = 1').run();
+        await db.prepare('UPDATE notifications SET is_read = 1').run();
       }
     } else if (id) {
-      db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(id);
+      await db.prepare('UPDATE notifications SET is_read = 1 WHERE id = ?').run(id);
     }
 
     return NextResponse.json({ success: true });

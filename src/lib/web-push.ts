@@ -1,18 +1,21 @@
 import webpush from 'web-push';
 import { db } from './db';
 
-// VAPID keys configuration
-export const VAPID_PUBLIC_KEY =
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
-  'BA7tO3wlChrmn2MOjiUm0dvTtrZk3nlJqH30Ng23H40XtItx0qZWPhJ6wHVrt8QIwHdlTSHqglGRsO-2ZIVSobk';
-
-export const VAPID_PRIVATE_KEY =
-  process.env.VAPID_PRIVATE_KEY || 'y1LlNDU78hniUTTnndjhtnAmjTR6PPU6dnMgKc0XfBM';
-
+// VAPID keys configuration (set in .env.local or hosting environment variables)
+export const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
+export const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
 export const VAPID_SUBJECT =
   process.env.VAPID_SUBJECT || 'mailto:notifications@nirmaanwatertech.com';
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+export const isVapidConfigured = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+
+if (isVapidConfigured) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+} else {
+  console.error(
+    '[WebPushService] VAPID keys missing. Set NEXT_PUBLIC_VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY.'
+  );
+}
 
 export interface PushSubscriptionItem {
   id: string;
@@ -35,7 +38,7 @@ export class WebPushService {
   /**
    * Save or update subscription for a user
    */
-  static saveSubscription(
+  static async saveSubscription(
     userId: string,
     subscription: {
       endpoint: string;
@@ -43,7 +46,7 @@ export class WebPushService {
     }
   ) {
     const id = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(endpoint) DO UPDATE SET
@@ -59,19 +62,19 @@ export class WebPushService {
   /**
    * Remove subscription (e.g. if expired or unsubscribed)
    */
-  static removeSubscription(endpoint: string) {
-    db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+  static async removeSubscription(endpoint: string) {
+    await db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
   }
 
   /**
    * Send web push notification to a list of users (by user ID or employee ID)
    */
   static async sendPushToUsers(userIds: string[], payload: PushPayload) {
-    if (!userIds || userIds.length === 0) return { sentCount: 0 };
+    if (!isVapidConfigured || !userIds || userIds.length === 0) return { sentCount: 0 };
 
     const placeholders = userIds.map(() => '?').join(',');
     // Fetch all active device endpoints for these user IDs or employee IDs
-    const subscriptions = db
+    const subscriptions = await db
       .prepare(`
         SELECT ps.* FROM push_subscriptions ps
         LEFT JOIN users u ON u.id = ps.user_id
@@ -105,7 +108,7 @@ export class WebPushService {
           console.warn(`[WebPushService] Push delivery error for device ${sub.id}:`, err?.statusCode || err?.message);
           // 404 or 410 indicates subscription has expired or been revoked
           if (err?.statusCode === 404 || err?.statusCode === 410) {
-            this.removeSubscription(sub.endpoint);
+            await this.removeSubscription(sub.endpoint);
           }
         }
       })

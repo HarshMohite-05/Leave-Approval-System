@@ -89,6 +89,20 @@ export default function Home() {
     }
   }, [currentUser, refreshAllData]);
 
+  // Live updates: poll every 15s and refresh when the tab regains focus
+  useEffect(() => {
+    if (!currentUser) return;
+    const interval = setInterval(refreshAllData, 15000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshAllData();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [currentUser, refreshAllData]);
+
   const handleLogout = () => {
     localStorage.removeItem('nirmaan_current_user');
     setCurrentUser(null);
