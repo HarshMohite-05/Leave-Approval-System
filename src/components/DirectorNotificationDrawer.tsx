@@ -39,7 +39,7 @@ export default function DirectorNotificationDrawer({
       const url = targetUserId
         ? `/api/notifications?user_id=${targetUserId}`
         : '/api/notifications';
-      const res = await fetch(url);
+      const res = await fetch(url, { cache: 'no-store' });
       const data = await res.json();
       setNotifications(data.notifications || []);
       setUnreadCount(data.unreadCount || 0);

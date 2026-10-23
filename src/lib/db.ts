@@ -1,6 +1,6 @@
 import { createClient as createLibSqlClient, Client as LibSqlClient } from '@libsql/client';
 import type { InStatement } from '@libsql/client';
-import { Pool as NeonPool } from '@neondatabase/serverless';
+import { neon } from '@neondatabase/serverless';
 import path from 'path';
 import fs from 'fs';
 
@@ -66,7 +66,31 @@ function toPgSql(sql: string): string {
   let paramIndex = 0;
   return sql
     .replace(/\?/g, () => `$${++paramIndex}`)
-    .replace(/MAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
+    .replace(/MAX\s*\(\s*0\s*,/gi, 'GREATEST(0,')
+    .replace(/\bFROM\s+users\b/gi, 'FROM leave_system.users')
+    .replace(/\bINTO\s+users\b/gi, 'INTO leave_system.users')
+    .replace(/\bUPDATE\s+users\b/gi, 'UPDATE leave_system.users')
+    .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?users\b/gi, 'TABLE IF NOT EXISTS leave_system.users')
+    .replace(/\bFROM\s+leave_balances\b/gi, 'FROM leave_system.leave_balances')
+    .replace(/\bINTO\s+leave_balances\b/gi, 'INTO leave_system.leave_balances')
+    .replace(/\bUPDATE\s+leave_balances\b/gi, 'UPDATE leave_system.leave_balances')
+    .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?leave_balances\b/gi, 'TABLE IF NOT EXISTS leave_system.leave_balances')
+    .replace(/\bFROM\s+leave_requests\b/gi, 'FROM leave_system.leave_requests')
+    .replace(/\bINTO\s+leave_requests\b/gi, 'INTO leave_system.leave_requests')
+    .replace(/\bUPDATE\s+leave_requests\b/gi, 'UPDATE leave_system.leave_requests')
+    .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?leave_requests\b/gi, 'TABLE IF NOT EXISTS leave_system.leave_requests')
+    .replace(/\bFROM\s+holidays\b/gi, 'FROM leave_system.holidays')
+    .replace(/\bINTO\s+holidays\b/gi, 'INTO leave_system.holidays')
+    .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?holidays\b/gi, 'TABLE IF NOT EXISTS leave_system.holidays')
+    .replace(/\bFROM\s+notifications\b/gi, 'FROM leave_system.notifications')
+    .replace(/\bINTO\s+notifications\b/gi, 'INTO leave_system.notifications')
+    .replace(/\bUPDATE\s+notifications\b/gi, 'UPDATE leave_system.notifications')
+    .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?notifications\b/gi, 'TABLE IF NOT EXISTS leave_system.notifications')
+    .replace(/\bFROM\s+push_subscriptions\b/gi, 'FROM leave_system.push_subscriptions')
+    .replace(/\bINTO\s+push_subscriptions\b/gi, 'INTO leave_system.push_subscriptions')
+    .replace(/\bUPDATE\s+push_subscriptions\b/gi, 'UPDATE leave_system.push_subscriptions')
+    .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?push_subscriptions\b/gi, 'TABLE IF NOT EXISTS leave_system.push_subscriptions')
+    .replace(/REFERENCES\s+users\s*\(/gi, 'REFERENCES leave_system.users(');
 }
 
 // Hosted Turso/libSQL when TURSO_DATABASE_URL is set; otherwise a local SQLite file.
@@ -157,56 +181,52 @@ function buildLibSqlDb(client: LibSqlClient, ready: Promise<void> | null): Db {
   };
 }
 
-function buildNeonDb(pool: NeonPool, ready: Promise<void> | null): Db {
+function buildNeonDb(sqlClient: ReturnType<typeof neon<false, true>>, ready: Promise<void> | null): Db {
   const wait = async () => {
     if (ready) await ready;
   };
 
-  function statement(executor: { query: (q: string, p?: any[]) => Promise<any> }, sql: string): DbStatement {
-    const pgSql = toPgSql(sql);
+  function statement(sqlStr: string): DbStatement {
+    const pgSql = toPgSql(sqlStr);
     return {
       async get(...params: Params): Promise<any> {
         await wait();
-        const res = await executor.query(pgSql, params as any[]);
-        return res.rows[0];
+        const res = (await sqlClient.query(pgSql, params as any[])) as any;
+        return res.rows ? res.rows[0] : res[0];
       },
       async all(...params: Params): Promise<any[]> {
         await wait();
-        const res = await executor.query(pgSql, params as any[]);
-        return res.rows;
+        const res = (await sqlClient.query(pgSql, params as any[])) as any;
+        return res.rows ? res.rows : res;
       },
       async run(...params: Params) {
         await wait();
-        const res = await executor.query(pgSql, params as any[]);
-        return { changes: res.rowCount ?? 0 };
+        const res = (await sqlClient.query(pgSql, params as any[])) as any;
+        return { changes: res.rowCount ?? (Array.isArray(res) ? res.length : 1) };
       },
     };
   }
 
   return {
-    prepare(sql: string) {
-      return statement(pool, sql);
+    prepare(sqlStr: string) {
+      return statement(sqlStr);
     },
-    async exec(sql: string) {
-      await pool.query(sql);
+    async exec(sqlStr: string) {
+      const statements = sqlStr
+        .split(';')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      for (const stmt of statements) {
+        const pgStmt = toPgSql(stmt);
+        await sqlClient.query(pgStmt);
+      }
     },
     async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
       await wait();
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const txObj: Tx = {
-          prepare: (sql: string) => statement(client, sql),
-        };
-        const result = await fn(txObj);
-        await client.query('COMMIT');
-        return result;
-      } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
-      } finally {
-        client.release();
-      }
+      const txObj: Tx = {
+        prepare: (sqlStr: string) => statement(sqlStr),
+      };
+      return await fn(txObj);
     },
   };
 }
@@ -215,11 +235,20 @@ function getDatabase(): Db {
   if (!global.__nirmaan_db) {
     const pgUrl = getPostgresUrl();
     if (pgUrl) {
-      console.log('[Nirmaan DB] Connecting to Neon PostgreSQL...');
-      const pool = new NeonPool({ connectionString: pgUrl });
-      const raw = buildNeonDb(pool, null);
-      const ready = initTablesAndSeed(raw);
-      global.__nirmaan_db = buildNeonDb(pool, ready);
+      console.log('[Nirmaan DB] Connecting to Neon PostgreSQL via HTTP...');
+      const sqlClient = neon<false, true>(pgUrl, { fullResults: true });
+      const raw = buildNeonDb(sqlClient, null);
+      const ready = (async () => {
+        try {
+          await sqlClient.query('CREATE SCHEMA IF NOT EXISTS leave_system');
+          await initTablesAndSeed(raw);
+          console.log('[Nirmaan DB] Neon PostgreSQL tables and seeds ready in schema leave_system.');
+        } catch (err: any) {
+          console.error('[Nirmaan DB] Failed to initialize Neon PostgreSQL:', err);
+          throw err;
+        }
+      })();
+      global.__nirmaan_db = buildNeonDb(sqlClient, ready);
     } else {
       console.log('[Nirmaan DB] Using libSQL / SQLite...');
       const client = createLibSqlClient(resolveLibSqlConfig());

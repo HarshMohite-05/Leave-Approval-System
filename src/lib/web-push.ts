@@ -1,9 +1,13 @@
 import webpush from 'web-push';
 import { db } from './db';
 
-// VAPID keys configuration (set in .env.local or hosting environment variables)
-export const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '';
-export const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '';
+// VAPID keys configuration (with production fallback if not set in Vercel environment)
+export const VAPID_PUBLIC_KEY =
+  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ||
+  'BFGBlen0IueSvOQJkxyFNwwEt3L3zGFtGubNmKho0ool8fohLLFM3hFLDg-ixCdb0uFHkRJSXGGEL69lq6yhTj0';
+export const VAPID_PRIVATE_KEY =
+  process.env.VAPID_PRIVATE_KEY ||
+  'VLqBQGvEin18aVQSTuOpkUBdzFtlVNYDHmYYAfAUaDM';
 export const VAPID_SUBJECT =
   process.env.VAPID_SUBJECT || 'mailto:notifications@nirmaanwatertech.com';
 
