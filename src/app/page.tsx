@@ -9,7 +9,7 @@ import EmployeeDashboard from '@/components/EmployeeDashboard';
 import DirectorNotificationDrawer from '@/components/DirectorNotificationDrawer';
 import DailyDigestModal from '@/components/DailyDigestModal';
 import { User, LeaveBalance, LeaveRequest, Holiday } from '@/lib/types';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, AlertTriangle } from 'lucide-react';
 import { syncPushSubscription } from '@/lib/push-client';
 
 export default function Home() {
@@ -24,39 +24,43 @@ export default function Home() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [digestModalOpen, setDigestModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [dbStatus, setDbStatus] = useState<{ isPersistent: boolean; mode: string } | null>(null);
 
   // Load all system data
   const refreshAllData = useCallback(async () => {
     try {
       // 1. Fetch leaves
-      const leavesRes = await fetch('/api/leaves');
+      const leavesRes = await fetch('/api/leaves', { cache: 'no-store' });
       const leavesData = await leavesRes.json();
       if (leavesData.leaves) {
         setLeaves(leavesData.leaves);
       }
+      if (leavesData.dbStatus) {
+        setDbStatus(leavesData.dbStatus);
+      }
 
       // 2. Fetch employees & balances
-      const empRes = await fetch('/api/employees');
+      const empRes = await fetch('/api/employees', { cache: 'no-store' });
       const empData = await empRes.json();
       if (empData.employees) {
         setEmployees(empData.employees);
       }
 
       // 3. Fetch holidays
-      const holRes = await fetch('/api/holidays');
+      const holRes = await fetch('/api/holidays', { cache: 'no-store' });
       const holData = await holRes.json();
       if (holData.holidays) {
         setHolidays(holData.holidays);
       }
 
       // 4. Fetch notification count
-      const notifRes = await fetch('/api/notifications');
+      const notifRes = await fetch('/api/notifications', { cache: 'no-store' });
       const notifData = await notifRes.json();
       setUnreadNotificationsCount(notifData.unreadCount || 0);
 
       // 5. Refresh current user's balance
       if (currentUser) {
-        const userRes = await fetch(`/api/auth/me?user_id=${currentUser.id}`);
+        const userRes = await fetch(`/api/auth/me?user_id=${currentUser.id}`, { cache: 'no-store' });
         const userData = await userRes.json();
         if (userData.balance) {
           setCurrentBalance(userData.balance);
@@ -137,7 +141,7 @@ export default function Home() {
   }
 
   // Filter leaves for individual employees (Mahesh, Ritesh, Shubham)
-  const myLeaves = leaves.filter((l) => l.user_id === currentUser.id);
+  const myLeaves = leaves.filter((l) => l.user_id === currentUser.id || l.employee_id === currentUser.employee_id);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
@@ -152,6 +156,21 @@ export default function Home() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {dbStatus && !dbStatus.isPersistent && (currentUser.role === 'DIRECTOR' || currentUser.role === 'ADMIN') && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 flex items-start gap-3 shadow-sm">
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="text-xs sm:text-sm">
+              <p className="font-extrabold text-amber-900 flex items-center gap-1.5">
+                Database Notice: Running on Ephemeral Serverless Storage (/tmp)
+              </p>
+              <p className="mt-1 text-amber-800 leading-relaxed">
+                The application is deployed on Vercel without <code className="px-1.5 py-0.5 bg-amber-100 rounded text-amber-950 font-mono font-bold">TURSO_DATABASE_URL</code>.
+                In serverless environments, files in <code className="px-1.5 py-0.5 bg-amber-100 rounded text-amber-950 font-mono font-bold">/tmp</code> are erased during cold starts after a few minutes of inactivity.
+                To preserve leave requests and user balances permanently, connect a free Turso cloud database and set <code className="px-1.5 py-0.5 bg-amber-100 rounded text-amber-950 font-mono font-bold">TURSO_DATABASE_URL</code> and <code className="px-1.5 py-0.5 bg-amber-100 rounded text-amber-950 font-mono font-bold">TURSO_AUTH_TOKEN</code> in your Vercel Project Settings.
+              </p>
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="py-24 text-center text-slate-500">
             <RefreshCw className="w-8 h-8 animate-spin mx-auto text-sky-600 mb-3" />

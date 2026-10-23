@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { db, getDatabaseMetadata } from '@/lib/db';
 import { LeaveRequest, Holiday, LeaveBalance, User } from '@/lib/types';
 import { calculateWorkingDays, isSameDayLeave, checkTechnicianOverlap } from '@/lib/date-utils';
 import { NotificationService } from '@/lib/notifications';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   try {
@@ -35,7 +38,14 @@ export async function GET(req: NextRequest) {
     query += ' ORDER BY created_at DESC';
 
     const leaves = await db.prepare(query).all(...params) as LeaveRequest[];
-    return NextResponse.json({ leaves });
+    return NextResponse.json(
+      { leaves, dbStatus: getDatabaseMetadata() },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

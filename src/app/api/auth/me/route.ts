@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { User } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -28,7 +31,14 @@ export async function GET(req: NextRequest) {
       .get(user.id, currentYear);
 
     const { password: _, ...safeUser } = user;
-    return NextResponse.json({ user: safeUser, balance });
+    return NextResponse.json(
+      { user: safeUser, balance },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

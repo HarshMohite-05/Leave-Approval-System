@@ -3,6 +3,9 @@ import { db } from '@/lib/db';
 import { LeaveRequest, User } from '@/lib/types';
 import { NotificationService } from '@/lib/notifications';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }

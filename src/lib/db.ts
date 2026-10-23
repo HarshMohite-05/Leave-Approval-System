@@ -1,42 +1,90 @@
-import { createClient, Client, InStatement } from '@libsql/client';
+import { createClient as createLibSqlClient, Client as LibSqlClient } from '@libsql/client';
+import type { InStatement } from '@libsql/client';
+import { Pool as NeonPool } from '@neondatabase/serverless';
 import path from 'path';
 import fs from 'fs';
 
-// Hosted Turso/libSQL when TURSO_DATABASE_URL is set; otherwise a local SQLite file.
-// (On Vercel without Turso the file lives in /tmp and is wiped on cold starts.)
-function resolveConfig() {
-  if (process.env.TURSO_DATABASE_URL) {
-    return { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN };
-  }
-  const file =
-    process.env.VERCEL === '1'
-      ? path.join('/tmp', 'nirmaan_leave.db')
-      : path.join(process.cwd(), 'data', 'nirmaan_leave.db');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  return { url: `file:${file}`, authToken: undefined };
-}
-
 type Params = unknown[];
-type Executor = { execute: (stmt: InStatement) => ReturnType<Client['execute']> };
 
-function statement(executor: Executor, sql: string) {
-  const exec = (params: Params) => executor.execute({ sql, args: params as any });
-  return {
-    async get(...params: Params): Promise<any> {
-      return (await exec(params)).rows[0] as any;
-    },
-    async all(...params: Params): Promise<any[]> {
-      return (await exec(params)).rows as any[];
-    },
-    async run(...params: Params) {
-      const r = await exec(params);
-      return { changes: r.rowsAffected };
-    },
-  };
+export interface DbStatement {
+  get: (...params: Params) => Promise<any>;
+  all: (...params: Params) => Promise<any[]>;
+  run: (...params: Params) => Promise<{ changes: number }>;
 }
 
 export interface Tx {
-  prepare: (sql: string) => ReturnType<typeof statement>;
+  prepare: (sql: string) => DbStatement;
+}
+
+export interface Db {
+  prepare: (sql: string) => DbStatement;
+  exec: (sql: string) => Promise<void>;
+  transaction: <T>(fn: (tx: Tx) => Promise<T>) => Promise<T>;
+}
+
+export function getPostgresUrl(): string | undefined {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL_NON_POOLING ||
+    process.env.NEON_DATABASE_URL
+  );
+}
+
+export function getDatabaseMetadata() {
+  const pgUrl = getPostgresUrl();
+  const hasTurso = Boolean(process.env.TURSO_DATABASE_URL);
+  const isVercel = process.env.VERCEL === '1';
+
+  if (pgUrl) {
+    return {
+      isPersistent: true,
+      provider: 'neon_postgres',
+      mode: 'Neon PostgreSQL (Cloud)',
+    };
+  }
+  if (hasTurso) {
+    return {
+      isPersistent: true,
+      provider: 'turso',
+      mode: 'Turso libSQL (Cloud)',
+    };
+  }
+  return {
+    isPersistent: !isVercel,
+    provider: isVercel ? 'ephemeral_tmp' : 'local_sqlite',
+    mode: isVercel ? 'Vercel Ephemeral (/tmp) - Non-persistent' : 'Local SQLite',
+  };
+}
+
+export const isDatabasePersistent = Boolean(
+  getPostgresUrl() || process.env.TURSO_DATABASE_URL || process.env.VERCEL !== '1'
+);
+
+function toPgSql(sql: string): string {
+  let paramIndex = 0;
+  return sql
+    .replace(/\?/g, () => `$${++paramIndex}`)
+    .replace(/MAX\s*\(\s*0\s*,/gi, 'GREATEST(0,');
+}
+
+// Hosted Turso/libSQL when TURSO_DATABASE_URL is set; otherwise a local SQLite file.
+function resolveLibSqlConfig() {
+  if (process.env.TURSO_DATABASE_URL) {
+    return { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN };
+  }
+  const isVercel = process.env.VERCEL === '1';
+  if (isVercel) {
+    console.error(
+      '[Nirmaan DB] CRITICAL WARNING: Running on Vercel without persistent database! SQLite database is stored in ephemeral /tmp and will be wiped on serverless cold starts. Connect Neon PostgreSQL (POSTGRES_URL) or Turso (TURSO_DATABASE_URL) in Vercel project environment variables to persist data.'
+    );
+  }
+  const file = isVercel
+    ? path.join('/tmp', 'nirmaan_leave.db')
+    : path.join(process.cwd(), 'data', 'nirmaan_leave.db');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  return { url: `file:${file}`, authToken: undefined };
 }
 
 declare global {
@@ -44,28 +92,59 @@ declare global {
   var __nirmaan_db: Db | undefined;
 }
 
-function buildDb(client: Client, ready: Promise<void> | null) {
+function buildLibSqlDb(client: LibSqlClient, ready: Promise<void> | null): Db {
   const wait = async () => {
     if (ready) await ready;
   };
+
+  function statement(sql: string): DbStatement {
+    const exec = (params: Params) => client.execute({ sql, args: params as any });
+    return {
+      async get(...params: Params): Promise<any> {
+        await wait();
+        return (await exec(params)).rows[0] as any;
+      },
+      async all(...params: Params): Promise<any[]> {
+        await wait();
+        return (await exec(params)).rows as any[];
+      },
+      async run(...params: Params) {
+        await wait();
+        const r = await exec(params);
+        return { changes: r.rowsAffected };
+      },
+    };
+  }
+
   return {
     prepare(sql: string) {
-      const base = statement(client, sql);
-      return {
-        get: async (...p: Params) => (await wait(), base.get(...p)),
-        all: async (...p: Params) => (await wait(), base.all(...p)),
-        run: async (...p: Params) => (await wait(), base.run(...p)),
-      };
+      return statement(sql);
     },
     async exec(sql: string) {
       await client.executeMultiple(sql);
     },
-    /** Runs fn atomically. Use the `tx` argument for all queries inside. */
     async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
       await wait();
       const t = await client.transaction('write');
       try {
-        const result = await fn({ prepare: (sql) => statement(t, sql) });
+        const txObj: Tx = {
+          prepare: (sql: string) => {
+            const exec = (params: Params) => t.execute({ sql, args: params as any });
+            return {
+              async get(...params: Params): Promise<any> {
+                return (await exec(params)).rows[0] as any;
+              },
+              async all(...params: Params): Promise<any[]> {
+                return (await exec(params)).rows as any[];
+              },
+              async run(...params: Params) {
+                const r = await exec(params);
+                return { changes: r.rowsAffected };
+              },
+            };
+          },
+        };
+        const result = await fn(txObj);
         await t.commit();
         return result;
       } catch (err) {
@@ -78,14 +157,76 @@ function buildDb(client: Client, ready: Promise<void> | null) {
   };
 }
 
-type Db = ReturnType<typeof buildDb>;
+function buildNeonDb(pool: NeonPool, ready: Promise<void> | null): Db {
+  const wait = async () => {
+    if (ready) await ready;
+  };
+
+  function statement(executor: { query: (q: string, p?: any[]) => Promise<any> }, sql: string): DbStatement {
+    const pgSql = toPgSql(sql);
+    return {
+      async get(...params: Params): Promise<any> {
+        await wait();
+        const res = await executor.query(pgSql, params as any[]);
+        return res.rows[0];
+      },
+      async all(...params: Params): Promise<any[]> {
+        await wait();
+        const res = await executor.query(pgSql, params as any[]);
+        return res.rows;
+      },
+      async run(...params: Params) {
+        await wait();
+        const res = await executor.query(pgSql, params as any[]);
+        return { changes: res.rowCount ?? 0 };
+      },
+    };
+  }
+
+  return {
+    prepare(sql: string) {
+      return statement(pool, sql);
+    },
+    async exec(sql: string) {
+      await pool.query(sql);
+    },
+    async transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+      await wait();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const txObj: Tx = {
+          prepare: (sql: string) => statement(client, sql),
+        };
+        const result = await fn(txObj);
+        await client.query('COMMIT');
+        return result;
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
 
 function getDatabase(): Db {
   if (!global.__nirmaan_db) {
-    const client = createClient(resolveConfig());
-    const raw = buildDb(client, null);
-    const ready = client.execute('PRAGMA foreign_keys = ON').then(() => initTablesAndSeed(raw));
-    global.__nirmaan_db = buildDb(client, ready);
+    const pgUrl = getPostgresUrl();
+    if (pgUrl) {
+      console.log('[Nirmaan DB] Connecting to Neon PostgreSQL...');
+      const pool = new NeonPool({ connectionString: pgUrl });
+      const raw = buildNeonDb(pool, null);
+      const ready = initTablesAndSeed(raw);
+      global.__nirmaan_db = buildNeonDb(pool, ready);
+    } else {
+      console.log('[Nirmaan DB] Using libSQL / SQLite...');
+      const client = createLibSqlClient(resolveLibSqlConfig());
+      const raw = buildLibSqlDb(client, null);
+      const ready = client.execute('PRAGMA foreign_keys = ON').then(() => initTablesAndSeed(raw));
+      global.__nirmaan_db = buildLibSqlDb(client, ready);
+    }
   }
   return global.__nirmaan_db;
 }
@@ -111,7 +252,7 @@ async function initTablesAndSeed(database: Db) {
       password TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'ACTIVE',
       avatar_color TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS leave_balances (
@@ -153,9 +294,9 @@ async function initTablesAndSeed(database: Db) {
       technician_overlap_details TEXT,
       action_by_id TEXT,
       action_by_name TEXT,
-      action_at DATETIME,
+      action_at TIMESTAMP,
       action_remarks TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     );
 
@@ -175,7 +316,7 @@ async function initTablesAndSeed(database: Db) {
       leave_request_id TEXT,
       metadata TEXT,
       is_read INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -184,15 +325,16 @@ async function initTablesAndSeed(database: Db) {
       endpoint TEXT NOT NULL UNIQUE,
       p256dh TEXT NOT NULL,
       auth TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
 
-  // Seed default 6 users if users table is empty
-  // Policy: 12 casual + 12 sick per year, no paid leave (also fixes existing rows)
+  // Policy: 12 casual + 12 sick per year, no paid leave
   await database.prepare('UPDATE leave_balances SET sl_allocated = 12, pl_allocated = 0 WHERE sl_allocated != 12 OR pl_allocated != 0').run();
 
-  const count = ((await database.prepare('SELECT COUNT(*) as count FROM users').get()) as { count: number }).count;
+  const countRow = ((await database.prepare('SELECT COUNT(*) as count FROM users').get()) as { count: any }) || { count: 0 };
+  const count = Number(countRow.count);
+
   if (count === 0) {
     const seedUsers = [
       {
@@ -280,12 +422,15 @@ async function initTablesAndSeed(database: Db) {
     await database.transaction(async (tx) => {
       for (const u of seedUsers) {
         await tx.prepare(`
-          INSERT OR IGNORE INTO users (id, employee_id, name, role, designation, department, reports_to, contact, email, password, avatar_color)
+          INSERT INTO users (id, employee_id, name, role, designation, department, reports_to, contact, email, password, avatar_color)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT (id) DO NOTHING
         `).run(u.id, u.employee_id, u.name, u.role, u.designation, u.department, u.reports_to, u.contact, u.email, u.password, u.avatar_color);
+
         await tx.prepare(`
-          INSERT OR IGNORE INTO leave_balances (user_id, year, cl_allocated, cl_used, cl_pending, sl_allocated, sl_used, sl_pending, pl_allocated, pl_used, pl_pending, co_allocated, co_used, co_pending, lop_days)
+          INSERT INTO leave_balances (user_id, year, cl_allocated, cl_used, cl_pending, sl_allocated, sl_used, sl_pending, pl_allocated, pl_used, pl_pending, co_allocated, co_used, co_pending, lop_days)
           VALUES (?, ?, 12, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+          ON CONFLICT (user_id, year) DO NOTHING
         `).run(u.id, currentYear);
       }
     });
@@ -304,7 +449,7 @@ async function initTablesAndSeed(database: Db) {
 
     for (const h of holidays) {
       await database
-        .prepare('INSERT OR IGNORE INTO holidays (id, name, date, is_optional) VALUES (?, ?, ?, ?)')
+        .prepare('INSERT INTO holidays (id, name, date, is_optional) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING')
         .run(h.id, h.name, h.date, h.is_optional);
     }
   }

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { NotificationItem } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -23,10 +26,17 @@ export async function GET(req: NextRequest) {
       : await db.prepare('SELECT COUNT(*) as count FROM notifications WHERE is_read = 0').get();
     const unreadCount = countStmt as { count: number };
 
-    return NextResponse.json({
-      notifications,
-      unreadCount: unreadCount?.count || 0,
-    });
+    return NextResponse.json(
+      {
+        notifications,
+        unreadCount: unreadCount?.count || 0,
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
