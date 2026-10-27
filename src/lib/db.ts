@@ -53,8 +53,8 @@ export function getDatabaseMetadata() {
   }
   return {
     isPersistent: !isVercel,
-    provider: isVercel ? 'ephemeral_tmp' : 'local_sqlite',
-    mode: isVercel ? 'Vercel Ephemeral (/tmp) - Non-persistent' : 'Local SQLite',
+    provider: isVercel ? 'not_configured' : 'local_sqlite',
+    mode: isVercel ? 'No database configured - set DATABASE_URL on Vercel' : 'Local SQLite',
   };
 }
 
@@ -68,6 +68,7 @@ function toPgSql(sql: string): string {
     .replace(/\?/g, () => `$${++paramIndex}`)
     .replace(/MAX\s*\(\s*0\s*,/gi, 'GREATEST(0,')
     .replace(/\bFROM\s+users\b/gi, 'FROM leave_system.users')
+    .replace(/\bJOIN\s+users\b/gi, 'JOIN leave_system.users')
     .replace(/\bINTO\s+users\b/gi, 'INTO leave_system.users')
     .replace(/\bUPDATE\s+users\b/gi, 'UPDATE leave_system.users')
     .replace(/\bTABLE\s+(IF\s+NOT\s+EXISTS\s+)?users\b/gi, 'TABLE IF NOT EXISTS leave_system.users')
@@ -98,15 +99,14 @@ function resolveLibSqlConfig() {
   if (process.env.TURSO_DATABASE_URL) {
     return { url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN };
   }
-  const isVercel = process.env.VERCEL === '1';
-  if (isVercel) {
-    console.error(
-      '[Nirmaan DB] CRITICAL WARNING: Running on Vercel without persistent database! SQLite database is stored in ephemeral /tmp and will be wiped on serverless cold starts. Connect Neon PostgreSQL (POSTGRES_URL) or Turso (TURSO_DATABASE_URL) in Vercel project environment variables to persist data.'
+  // Never fall back to /tmp on Vercel: each serverless instance gets its own
+  // throwaway copy, so saved leaves silently "disappear" on the next request.
+  if (process.env.VERCEL === '1') {
+    throw new Error(
+      'No persistent database configured. Set DATABASE_URL / POSTGRES_URL (Neon) or TURSO_DATABASE_URL in the Vercel project environment variables (for Production and Preview) and redeploy.'
     );
   }
-  const file = isVercel
-    ? path.join('/tmp', 'nirmaan_leave.db')
-    : path.join(process.cwd(), 'data', 'nirmaan_leave.db');
+  const file = path.join(process.cwd(), 'data', 'nirmaan_leave.db');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   return { url: `file:${file}`, authToken: undefined };
 }
@@ -236,7 +236,11 @@ function getDatabase(): Db {
     const pgUrl = getPostgresUrl();
     if (pgUrl) {
       console.log('[Nirmaan DB] Connecting to Neon PostgreSQL via HTTP...');
-      const sqlClient = neon<false, true>(pgUrl, { fullResults: true });
+      // no-store: keep Next.js's fetch cache from serving stale query results
+      const sqlClient = neon<false, true>(pgUrl, {
+        fullResults: true,
+        fetchOptions: { cache: 'no-store' },
+      });
       const raw = buildNeonDb(sqlClient, null);
       const ready = (async () => {
         try {
