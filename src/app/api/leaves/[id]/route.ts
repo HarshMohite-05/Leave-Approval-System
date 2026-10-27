@@ -197,3 +197,65 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+// Permanently remove a leave request (Directors only) and undo its balance effect
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const callerId = searchParams.get('caller_id');
+
+    const caller = await db.prepare('SELECT * FROM users WHERE id = ?').get(callerId) as User | undefined;
+    if (!caller || caller.role !== 'DIRECTOR') {
+      return NextResponse.json(
+        { error: 'Forbidden: Only Directors can delete leave requests.' },
+        { status: 403 }
+      );
+    }
+
+    const leave = await db
+      .prepare('SELECT * FROM leave_requests WHERE id = ?')
+      .get(params.id) as LeaveRequest | undefined;
+
+    if (!leave) {
+      return NextResponse.json({ error: 'Leave request not found' }, { status: 404 });
+    }
+
+    const currentYear = new Date().getFullYear();
+
+    await db.transaction(async (tx) => {
+      // Release locked (pending) or consumed (approved) days
+      if (leave.status === 'PENDING' || leave.status === 'APPROVED') {
+        if (leave.leave_type !== 'UNPAID') {
+          const prefix =
+            leave.leave_type === 'CASUAL' ? 'cl' : leave.leave_type === 'SICK' ? 'sl' : 'co';
+          const col = `${prefix}_${leave.status === 'PENDING' ? 'pending' : 'used'}`;
+          await tx.prepare(`
+            UPDATE leave_balances
+            SET ${col} = MAX(0, ${col} - ?)
+            WHERE user_id = ? AND year = ?
+          `).run(leave.total_days, leave.user_id, currentYear);
+        } else if (leave.status === 'APPROVED') {
+          await tx.prepare(`
+            UPDATE leave_balances
+            SET lop_days = MAX(0, lop_days - ?)
+            WHERE user_id = ? AND year = ?
+          `).run(leave.total_days, leave.user_id, currentYear);
+        }
+      }
+
+      await tx.prepare('DELETE FROM notifications WHERE leave_request_id = ?').run(leave.id);
+      await tx.prepare('DELETE FROM leave_requests WHERE id = ?').run(leave.id);
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: `Leave request of ${leave.employee_name} deleted.`,
+    });
+  } catch (error: any) {
+    console.error('Leave delete error:', error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

@@ -243,6 +243,27 @@ export default function DirectorDashboard({
     }
   };
 
+  // Handle Delete Leave Request (permanent, restores balance)
+  const handleDeleteLeave = async (leave: LeaveRequest) => {
+    if (!confirm(`Permanently delete ${leave.employee_name}'s ${leave.leave_type} leave (${leave.start_date})? Any used or locked days will be returned to their balance.`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/leaves/${leave.id}?caller_id=${currentDirector.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to delete leave request');
+      } else {
+        onRefreshData();
+      }
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   // Handle Add Holiday
   const handleAddHoliday = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -667,6 +688,14 @@ export default function DirectorDashboard({
                             </button>
                           </div>
                         )}
+                        <button
+                          onClick={() => handleDeleteLeave(leave)}
+                          title="Delete leave request"
+                          className="self-start flex-shrink-0 px-3 py-2 rounded-xl border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 text-xs font-bold transition-all flex items-center gap-1.5"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </button>
                       </div>
                     </div>
                   </div>
